@@ -1,0 +1,744 @@
+# Data File Preparation----
+library(dplyr)
+library(readxl)
+library(MatchIt)
+library(effsize)
+library(ggeffects)
+
+# Attendance
+# # !! IF REPLICATING THIS ANALYSIS, YOU CAN SKIP THIS SECTION !!
+# # I have already migrated attendance data into the main datafile.
+# 
+# # SCS attendance files sometimes have several rows for each student
+# # Let's combine the attendance data by student
+# 
+# Attendance <- read_excel("Data/Attendance 2122 K-5 (11.5.22).xlsx")
+# 
+# # Calculate the number of days a student was present for each entry
+# Attendance$DaysPresent <- (Attendance$DaysEnrolled
+#                           - Attendance$ExcusedAbsentDays
+#                           -Attendance$UnexcusedAbsentDays)
+# 
+# # aggregate DaysPresent by student, so now we'll just have one row/student
+# atn_sums <- aggregate(Attendance$DaysPresent,
+#                       by=list(PubID=Attendance$PubID),
+#                       FUN=sum)
+# colnames(atn_sums) <- c("PubID", "DaysPresent")
+# 
+# # aggregate DaysEnrolled by student
+# atn_enrolled <- aggregate(Attendance$DaysEnrolled,
+#                           by=list(PubID=Attendance$PubID),
+#                       FUN=sum)
+# colnames(atn_enrolled) <- c("PubID", "DaysEnrolled")
+# 
+# # By their powers combined, generate the attendance ratio
+# atn_sums <- full_join(atn_enrolled, atn_sums, by = "PubID")
+# atn_sums$AttendanceRatio <- atn_sums$DaysPresent/atn_sums$DaysEnrolled
+# 
+# write.csv(atn_sums, "Data/Combined Attendance Data.csv", row.names = FALSE)
+
+
+# Loading primary dataset
+
+# TCAP21 has so little data that it's getting imported as a logical
+# there's probably a more efficient way of handling this, but w/e
+uci <- read_excel("UCI Data Vars Only 2.xlsx", 
+                  col_types = c("numeric", "numeric", "text", 
+                                "numeric", "numeric", "numeric", 
+                                "numeric", "numeric", "numeric", 
+                                "numeric", "numeric", "numeric", 
+                                "numeric", "numeric", "numeric", 
+                                "numeric", "numeric", "numeric", 
+                                "numeric", "numeric", "numeric", 
+                                "text", "numeric", "numeric", "text", 
+                                "numeric", "numeric", "numeric", 
+                                "numeric", "numeric", "numeric", 
+                                "numeric"))
+View(uci)
+
+# Some schools have bizarrely small numbers of students with a Laureate 
+# teacher (one student in the whole school, for instance). So let's look
+# at the number of laureate students at each school.
+
+# y <- uci %>%
+#   group_by(General_School) %>%
+#   filter(row_number() == 1) %>%
+#   select(General_School, KeepSchool)
+# 
+# write.csv(y, "Laureate students per school.csv", row.names = FALSE)
+# 
+# # Histogram of student attendance ratio
+# hist(uci$TrueAttendance, xlab = "Days Attended/Days Enrolled",
+#      main = "SCS Student Attendance (77.8% of data missing)")
+# 
+# 
+# cor((uci$SpringOverallScaleScore - uci$FallOverallScaleScore), 
+#     y = uci$TrueAttendance, use = "complete.obs")
+
+# Only schools with a laureate
+lau <- filter(uci, KeepSchool > 0, Exclude == 0)
+lau2 <- filter(lau, TrueAbsenteeStatus != "ChronicallyAbsent" | is.na(TrueAbsenteeStatus))
+lex <- filter(lau, TrueAbsenteeStatus == "ChronicallyAbsent", !is.na(FallOverallScaleScore),
+              !is.na(SpringOverallScaleScore))
+
+# lau2_test <- filter(lau2, HasLaureate == 0)
+# mdl <- lm(FallOverallScaleScore ~ General_School, data = lau2_test)
+# 
+# lau2_nograde <- filter(lau2, HasLaureate == 1, LaureateGrade != 0,
+#                        LaureateGrade != 1, LaureateGrade != 2,
+#                        LaureateGrade != 3, LaureateGrade != 4)
+
+ucik <- filter(lau2, StudentGrade == 0)
+uci1 <- filter(lau2, StudentGrade == 1)
+uci2 <- filter(lau2, StudentGrade == 2)
+uci3 <- filter(lau2, StudentGrade == 3)
+uci4 <- filter(lau2, StudentGrade == 4, HasTCAP21 == 1, HasTCAP22 == 1)
+uci4_1 <- filter(lau2, StudentGrade == 4)
+# uci4$TCAP21 <- as.numeric(uci4$TCAP21) # Why is a continuous variable registering as logical??
+# uci4$TCAP22 <- as.numeric(uci4$TCAP22)
+
+
+uci_cov <- c("Female", "EconomicallyDisadvantaged", "SpecialEducationSWD",
+                "EnglishLanguageLearner", "Minority")
+
+# Functions
+
+check_balance <- function(df){
+  bal <- c()
+  bal[1] <-  cohen.d(df$FallOverallScaleScore ~ df$HasLaureate, 
+          hedges_correction = TRUE)$estimate  
+  bal[2] <- cohen.d(df$FallPhonicsScaleScore ~ df$HasLaureate, 
+          hedges_correction = TRUE)$estimate  
+  bal[3] <- cohen.d(df$FallVocabularyScaleScore ~ df$HasLaureate, 
+          hedges_correction = TRUE)$estimate 
+  bal[4] <- cies(df$Female, df$HasLaureate)
+  bal[5] <- cies(df$Minority, df$HasLaureate)
+  bal[6] <- cies(df$SpecialEducationSWD, df$HasLaureate)
+  bal[7] <-  cies(df$EnglishLanguageLearner, df$HasLaureate)
+  bal[8] <- cies(df$EconomicallyDisadvantaged, df$HasLaureate)
+  names(bal) <- c("Overall", "Phonics", "Vocab",
+                  "Female", "Minority", "SPED", "ELL", "ED")
+  return(bal)
+}
+
+# Kindergarten----
+
+# Nearest-neighbor propensity scores are calculated via logistic 
+# regression where the DV is a binary variable indicating treatment status
+# and the IVs are the variables to be balanced
+
+# The propensity score is just the chance a given student will be part of
+# the Treatment group according to the formula estimated
+# from the previous model
+
+km <- matchit(HasLaureate ~ Female + EconomicallyDisadvantaged 
+              + SpecialEducationSWD + EnglishLanguageLearner 
+              + Minority + FallOverallScaleScore + FallAtAboveOverall 
+              + FallAtAbovePhonics + FallAtAboveVocab, 
+              method = "nearest", 
+              exact = c("FallAtAboveOverall", "FallAtAbovePhonics",
+                        "FallAtAboveVocab"),
+              data = ucik)
+
+# Create a new dataset of just the matched data
+irk <- match.data(km)
+
+# Exact matching can drop cases, so we want to be sure that 
+# doesn't happen
+cat("K treatment cases dropped:", 
+    table(ucik$HasLaureate)[2] - table(irk$HasLaureate)[2])
+
+# Baseline equivalence 
+
+check_balance(irk)
+
+write.csv(irk, "irk.csv")
+
+
+# First Grade----
+
+fm <- matchit(HasLaureate ~ Female + EconomicallyDisadvantaged 
+              + SpecialEducationSWD + EnglishLanguageLearner 
+              + Minority + FallOverallScaleScore + FallAtAboveOverall 
+              + FallAtAbovePhonics + FallAtAboveVocab, 
+              method = "nearest", 
+              exact = c("FallAtAboveOverall", "FallAtAbovePhonics",
+                        "FallAtAboveVocab"),
+              data = uci1)
+
+ir1 <- match.data(fm)
+
+cat("1st gr treatment cases dropped:", 
+    table(uci1$HasLaureate)[2] - table(ir1$HasLaureate)[2])
+
+check_balance(ir1)
+
+write.csv(ir1, "ir1.csv")
+
+
+# Second Grade----
+
+sm <- matchit(HasLaureate ~ Female + EconomicallyDisadvantaged 
+              + SpecialEducationSWD + EnglishLanguageLearner 
+              + Minority + FallOverallScaleScore + FallAtAboveOverall 
+              + FallAtAbovePhonics + FallAtAboveVocab, 
+              method = "nearest", 
+              exact = c("FallAtAboveOverall", "FallAtAbovePhonics",
+                        "FallAtAboveVocab"),
+              data = uci2)
+
+ir2 <- match.data(sm)
+
+cat("2nd gr treatment cases dropped:", 
+    table(uci2$HasLaureate)[2] - table(ir2$HasLaureate)[2])
+
+check_balance(ir2)
+
+write.csv(ir2, "ir2.csv")
+
+
+# Third Grade----
+
+tm <- matchit(HasLaureate ~ Female + EconomicallyDisadvantaged 
+              + SpecialEducationSWD + EnglishLanguageLearner 
+              + Minority + FallOverallScaleScore + FallAtAboveOverall 
+              + FallAtAbovePhonics + FallAtAboveVocab, 
+              method = "nearest", 
+              exact = c("FallAtAboveOverall", "FallAtAbovePhonics",
+                        "FallAtAboveVocab"),
+              data = uci3)
+
+ir3 <- match.data(tm)
+cat("3rd gr treatment cases dropped:", 
+    table(uci3$HasLaureate)[2] - table(ir3$HasLaureate)[2])
+check_balance(ir3)
+write.csv(ir3, "ir3.csv")
+
+# Not all 3rd graders have phonics scores
+ir3phon <- filter(ir3, !is.na(FallPhonicsScaleScore), !is.na(SpringPhonicsScaleScore))
+
+# Fourth Grade----
+
+fourthm <- matchit(HasLaureate ~ Female + EconomicallyDisadvantaged 
+                   + SpecialEducationSWD + EnglishLanguageLearner 
+                   + Minority + FallOverallScaleScore + FallAtAboveOverall
+                   + FallAtAboveVocab + TCAP21AtAbove, 
+                   method = "nearest", 
+                   exact = c("FallAtAboveOverall", "FallAtAboveVocab"),
+                   data = uci4)
+
+ir4 <- match.data(fourthm)
+
+cat("4th gr treatment cases dropped:", 
+    table(uci4$HasLaureate)[2] - table(ir4$HasLaureate)[2])
+
+check_balance(ir4)
+
+write.csv(ir4, "ir4.csv")
+
+
+# Main ANCOVAs----
+
+uci_ancova <- function(df, dv, cv){
+     lm(formula = paste0(dv," ~ ", cv, " + Female + Minority",
+                     " + SpecialEducationSWD + EconomicallyDisadvantaged",  
+                     " + EnglishLanguageLearner + HasLaureate"), data = df)
+}
+
+uci_fall_ancova <- function(df, dv){
+  lm(formula = paste0(dv," ~ Female + Minority",
+                      " + SpecialEducationSWD + EconomicallyDisadvantaged",  
+                      " + EnglishLanguageLearner + HasLaureate"), data = df)
+  
+}
+
+ancova_table <- function(df, ancova, gr = "K", tm = "Pre"){
+    # df should be a dataframe with treatment in first column and dv in the second
+    tab <- data.frame(matrix(nrow =1, ncol = 13))
+    colnames(tab) <- c("Grade", "Time", "DV", "N", "T Mean", "T SD", 
+                       "C Mean", "C SD", "F", "p", "g", "PR", "II")
+    treat <- filter(df, df[, 1] == 1)
+    con <- filter(df, df[, 1] == 0)
+    tab[1, 1] <- gr
+    tab[1, 2] <- tm
+    tab[1, 3] <- colnames(df)[2]
+    tab[1, 4] <- nrow(df)
+    tab[1, 5] <- ggemmeans(ancova, terms = "HasLaureate")[2, 2]
+    tab[1, 6] <- sd(treat[, 2])
+    tab[1, 7] <- ggemmeans(ancova, terms = "HasLaureate")[1, 2]
+    tab[1, 8] <- sd(con[, 2])
+    tab[1, 9] <- anova(ancova)["HasLaureate", 4]
+    tab[1, 10] <- anova(ancova)["HasLaureate", 5]
+    tab[1, 11] <- hedges_g(tab[1, 5], tab[1, 6], tab[1, 4], tab[1, 7], tab[1, 8], tab[1, 4])
+    tab[1, 12] <- pnorm(tab[1, 11]) * 100 # percentile rank
+    tab[1, 13] <- tab[1, 12] - 50 # improvement index
+    return(tab)
+}
+
+
+anc_res <- data.frame(matrix(nrow = 18, ncol = 13))
+colnames(anc_res) <- c("Grade", "Time", "DV", "N", "T Mean", "T SD", "C Mean", "C SD", "F", "p", "g", "PR", "II")
+tp <- rep(c("Pre", "Post"), 50)
+dvs <- c("FallOverallScaleScore", "SpringOverallScaleScore",
+         "FallPhonicsScaleScore", "SpringPhonicsScaleScore",
+         "FallVocabularyScaleScore", "SpringVocabularyScaleScore")
+
+
+
+# Kindergarten
+
+kres <- list()
+kres[[1]] <- uci_fall_ancova(irk, "FallOverallScaleScore")
+kres[[2]] <- uci_ancova(irk, "SpringOverallScaleScore", "FallOverallScaleScore")
+kres[[3]] <- uci_fall_ancova(irk, "FallPhonicsScaleScore")
+kres[[4]] <- uci_ancova(irk, "SpringPhonicsScaleScore", "FallPhonicsScaleScore")
+kres[[5]] <- uci_fall_ancova(irk, "FallVocabularyScaleScore")
+kres[[6]]<- uci_ancova(irk, "SpringVocabularyScaleScore", "FallVocabularyScaleScore")
+
+for(i in 1:6){
+  anc_res[i, ] <- ancova_table(data.frame(irk$HasLaureate, irk[dvs[i]]), kres[[i]], "Kindergarten", tp[i])
+}
+
+
+# First Grade
+
+fres <- list()
+fres[[1]] <- uci_fall_ancova(ir1, "FallOverallScaleScore")
+fres[[2]] <- uci_ancova(ir1, "SpringOverallScaleScore", "FallOverallScaleScore")
+fres[[3]] <- uci_fall_ancova(ir1, "FallPhonicsScaleScore")
+fres[[4]] <- uci_ancova(ir1, "SpringPhonicsScaleScore", "FallPhonicsScaleScore")
+fres[[5]] <- uci_fall_ancova(ir1, "FallVocabularyScaleScore")
+fres[[6]]<- uci_ancova(ir1, "SpringVocabularyScaleScore", "FallVocabularyScaleScore")
+
+for(i in 1:6){
+  anc_res[(i + 6), ] <- ancova_table(data.frame(ir1$HasLaureate, ir1[dvs[i]]), fres[[i]], "first grade", tp[i])
+}
+
+
+# Second Grade
+
+sres <- list()
+sres[[1]] <- uci_fall_ancova(ir2, "FallOverallScaleScore")
+sres[[2]] <- uci_ancova(ir2, "SpringOverallScaleScore", "FallOverallScaleScore")
+sres[[3]] <- uci_fall_ancova(ir2, "FallPhonicsScaleScore")
+sres[[4]] <- uci_ancova(ir2, "SpringPhonicsScaleScore", "FallPhonicsScaleScore")
+sres[[5]] <- uci_fall_ancova(ir2, "FallVocabularyScaleScore")
+sres[[6]]<- uci_ancova(ir2, "SpringVocabularyScaleScore", "FallVocabularyScaleScore")
+
+for(i in 1:6){
+  anc_res[(i + 12), ] <- ancova_table(data.frame(ir2$HasLaureate, ir2[dvs[i]]), sres[[i]], "second grade", tp[i])
+}
+
+
+# Third Grade
+
+# Not all third graders have phonics scores
+ir3phon <- filter(ir3, !is.na(FallPhonicsScaleScore), !is.na(SpringPhonicsScaleScore))
+
+tres <- list()
+tres[[1]] <- uci_fall_ancova(ir3, "FallOverallScaleScore")
+tres[[2]] <- uci_ancova(ir3, "SpringOverallScaleScore", "FallOverallScaleScore")
+tres[[3]] <- uci_fall_ancova(ir3phon, "FallPhonicsScaleScore")
+tres[[4]] <- uci_ancova(ir3phon, "SpringPhonicsScaleScore", "FallPhonicsScaleScore")
+tres[[5]] <- uci_fall_ancova(ir3, "FallVocabularyScaleScore")
+tres[[6]]<- uci_ancova(ir3, "SpringVocabularyScaleScore", "FallVocabularyScaleScore")
+
+# Do this differently to account for different sample in the phonics group
+for(i in 1:2){
+  anc_res[(i + 18), ] <- ancova_table(data.frame(ir3$HasLaureate, ir3[dvs[i]]), tres[[i]], "third grade", tp[i])
+}
+for(i in 1:2){
+  anc_res[(i + 20), ] <- ancova_table(data.frame(ir3phon$HasLaureate, ir3phon[dvs[i+2]]), tres[[i+2]], "third grade", tp[i])
+}
+for(i in 1:2){
+  anc_res[(i + 22), ] <- ancova_table(data.frame(ir3$HasLaureate, ir3[dvs[i+4]]), tres[[i+4]], "third grade", tp[i])
+}
+
+
+# Fourth Grade
+
+# Not doing phonics in fourth grade
+dvs4 <- c("FallOverallScaleScore", "SpringOverallScaleScore", "FallVocabularyScaleScore", "SpringVocabularyScaleScore")
+
+
+fourthres <- list()
+fourthres[[1]] <- uci_fall_ancova(ir4, "FallOverallScaleScore")
+fourthres[[2]] <- uci_ancova(ir4, "SpringOverallScaleScore", "FallOverallScaleScore")
+fourthres[[3]] <- uci_fall_ancova(ir4, "FallVocabularyScaleScore")
+fourthres[[4]]<- uci_ancova(ir4, "SpringVocabularyScaleScore", "FallOverallScaleScore")
+
+for(i in 1:4){
+  anc_res[(i + 24), ] <- ancova_table(data.frame(ir4$HasLaureate, ir4[dvs4[i]]), fourthres[[i]], "fourth grade", tp[i])
+}
+
+# Results Cleanup----
+
+for(i in 4:8){anc_res[, i] <- round(anc_res[, i], 1)}
+for(i in 9:10){anc_res[, i] <- round(anc_res[, i], 3)}
+anc_res[, 11] <- round(anc_res[, 11], 2)
+for(i in 12:13){anc_res[, i] <- round(anc_res[, i])}
+
+write.csv(anc_res, "UCI main ancova results.csv")
+
+
+# Logistic Regressions----
+
+# Functions
+
+uci_log <- function(df, dv, cv){
+  glm(formula = paste0(dv," ~ ", cv, " + Female + Minority",
+             " + SpecialEducationSWD + EconomicallyDisadvantaged",  
+             " + EnglishLanguageLearner + HasLaureate"), family = binomial, data = df)
+}
+
+
+cies <- function(dv,iv){
+  if(length(table(dv)) != 2){
+    return(print("ERROR: First variable must have exactly two categories!"))
+  }
+  if(length(table(iv)) != 2){
+    return(print("ERROR: Second variable must have exactly two categories!"))
+  }
+
+  c_table <- table(dv, iv)
+  prob_c <- c_table[2,1]/(c_table[1,1] + c_table[2,1])
+  prob_t <- c_table[2,2]/(c_table[1,2] + c_table[2,2])
+  or <- (prob_t/(1-prob_t)) / (prob_c/(1-prob_c))
+  ces <- log(or)/1.65
+  return(ces)
+}
+
+
+log_table <- function(df, lreg, gr = "Kindergarten", tm = "Pre"){
+  # df should be a dataframe with treatment in first column and dv in the second
+  tab <- data.frame(matrix(nrow =1, ncol = 14))
+  colnames(tab) <- c("Grade", "Time", "DV", "N", "T % AA", "T % Below", 
+                     "C % AA", "C % Below", "B", "OR", "p", "CIES", "PR", "II")
+  df <- as.data.frame(df)  
+  atabove <- table(df)
+  t_ab <- round(atabove[2, 2] / sum(atabove[2, ]), 3) * 100
+  t_b <- 100 - t_ab
+  c_ab <- round(atabove[1, 2] / sum(atabove[1, ]), 3) * 100
+  c_b <- 100 - c_ab
+  y <- as.data.frame(summary(lreg)$coefficients)
+  
+  tab[1, 1] <- gr
+  tab[1, 2] <- tm
+  tab[1, 3] <- colnames(df)[2]
+  tab[1, 4] <- nrow(df)
+  tab[1, 5] <- t_ab
+  tab[1, 6] <- t_b
+  tab[1, 7] <- c_ab
+  tab[1, 8] <- c_b
+  tab[1, 9] <- lreg$coefficients["HasLaureate"]
+  tab[1, 10] <- exp(tab[1, 9])
+  tab[1, 11] <- y["HasLaureate", 4]
+  tab[1, 12] <- cies(df[, 1], df[, 2])
+  tab[1, 13] <- pnorm(tab[1, 12]) * 100 # percentile rank
+  tab[1, 14] <- tab[1, 13] - 50 # improvement index
+  return(tab)
+}
+
+lr_res <- data.frame(matrix(nrow = 12, ncol = 14))
+colnames(lr_res) <- c("Grade", "Time", "DV", "N", "T % AA", "T % Below", 
+                      "C % AA", "C % Below", "B", "OR", "p", "CIES", "PR", "II")
+
+# Filling out the table
+
+dvs <- c("SpringAtAboveOverall", "SpringAtAbovePhonics", "SpringAtAboveVocab")
+cvs <- c("FallAtAboveOverall", "FallAtAbovePhonics", "FallAtAboveVocab")
+grades <- c("Kindergarten", "first grade", "second grade", "third grade", "fourth grade")
+
+k <- 1
+logres <- list()
+for(i in 1:4){ 
+  if(i == 1){df <- irk}
+  if(i == 2){df <- ir1}
+  if(i == 3){df <- ir2}
+  if(i == 4){df <- ir3}
+  for(j in 1:3){ 
+    logres[[k]] <- uci_log(df, dvs[j], cvs[j])
+    lr_res[k, ] <- log_table(df[c("HasLaureate", dvs[j])], logres[[k]], grades[i], "Post")
+    k <- k + 1
+  }
+}
+
+# Fourth grade
+dvs4l <- c("SpringAtAboveOverall", "SpringAtAbovePhonics", "SpringAtAboveVocab")
+cvs4l <- c("FallAtAboveOverall", "FallAtAbovePhonics", "FallAtAboveVocab")
+
+k <- 13
+df <- ir4
+for(j in 1:3){ 
+  logres[[k]] <- uci_log(df, dvs4l[j], cvs4l[j])
+  lr_res[k, ] <- log_table(df[c("HasLaureate", dvs4l[j])], logres[[k]], grades[5], "Post")
+  k <- k + 1
+}
+
+
+# Results Cleanup
+
+for(i in c(9, 11)){lr_res[, i] <- round(lr_res[, i], 3)}
+for(i in c(10, 12)){lr_res[, i] <- round(lr_res[, i], 2)}
+for(i in 13:14){lr_res[, i] <- round(lr_res[, i])}
+lr_res <- lr_res[-c(16:18),]
+
+
+
+# Subgroups-----
+
+subgroup_table <- function(df, ancova, subgroup, gr = "K", tm = "Pre"){
+  # df should be a dataframe with treatment in first column and dv in the second
+  tab <- data.frame(matrix(nrow =1, ncol = 15))
+  colnames(tab) <- c("Grade", "Time", "DV", "Subgroup", "T Mean", "T SD", "T N",  
+                     "C Mean", "C SD", "C N", "Diff", "p", "g", "PR", "II")
+  treat <- filter(df, df[, 1] == 1)
+  con <- filter(df, df[, 1] == 0)
+  tab[1, 1] <- gr
+  tab[1, 2] <- tm
+  tab[1, 3] <- colnames(df)[2]
+  tab[1, 4] <- subgroup
+  tab[1, 5] <- ggemmeans(ancova, terms = "HasLaureate")[2, 2]
+  tab[1, 6] <- sd(unlist(treat[, 2]))
+  tab[1, 7] <- nrow(treat)
+  tab[1, 8] <- ggemmeans(ancova, terms = "HasLaureate")[1, 2]
+  tab[1, 9] <- sd(unlist(con[, 2]))
+  tab[1, 10] <- nrow(con)
+  tab[1, 11] <- tab[1, 5] - tab[1, 8]
+  tab[1, 12] <- anova(ancova)["HasLaureate", 5]
+  tab[1, 13] <- hedges_g(tab[1, 5], tab[1, 6], tab[1, 7], tab[1, 8], tab[1, 9], tab[1, 10])
+  tab[1, 14] <- pnorm(tab[1, 13]) * 100 # percentile rank
+  tab[1, 15] <- tab[1, 14] - 50 # improvement index
+  return(tab)
+}
+
+subgroup_ancova <- function(df, dv, cv){
+  lm(formula = paste0(dv," ~ ", cv, " + HasLaureate"), data = df)
+}
+
+# Filling out the table
+
+dvs <- c("SpringOverallScaleScore", "SpringPhonicsScaleScore", "SpringVocabularyScaleScore")
+cvs <- c("FallOverallScaleScore", "FallPhonicsScaleScore", "FallVocabularyScaleScore")
+grades <- c("Kindergarten", "first grade", "second grade", "third grade", "fourth grade")
+sgr <- c("Female", "Male", "SpecialEducationSWD", "EconomicallyDisadvantaged", "EnglishLanguageLearner")
+
+sub_res <- data.frame(matrix(nrow = 60, ncol = 15))
+colnames(sub_res) <- c("Grade", "Time", "DV", "Subgroup", "T Mean", "T SD", "T N",  
+                   "C Mean", "C SD", "C N", "Diff", "p", "g", "PR", "II")
+
+irk$Male <- irk$Female + 1
+ir1$Male <- ir1$Female + 1
+ir2$Male <- ir2$Female + 1
+ir3$Male <- ir3$Female + 1
+ir3phon$Male <- ir3phon$Female + 1
+
+k <- 1
+subres <- list()
+for(i in 1:4){ 
+  for(j in 1:3){ # subscales
+    for(l in 1:5){ # subgroups
+      if(i == 1){df <- irk}
+      if(i == 2){df <- ir1}
+      if(i == 3){df <- ir2}
+      if(i == 4){df <- ir3}
+      df <- filter(df, df[paste0(sgr[l])] == 1)
+      subres[[k]] <- subgroup_ancova(df, dvs[j], cvs[j])
+      sub_res[k, ] <- subgroup_table(df[c("HasLaureate", dvs[j])], subres[[k]], sgr[l], grades[i], "Post")
+      k <- k + 1
+    }
+  }
+}
+
+# 3rd phonics
+# For some reason this code can't access sub_res?? Typical R inconsistency.
+# So we make a new table
+# No we don't, bc now R won't write the correct info at all. Sigh. 
+# Do it manually instead.
+# sub_res2 <- data.frame(matrix(nrow = 5, ncol = 14))
+# colnames(sub_res) <- c("Grade", "Time", "DV", "Subgroup", "N", "T Mean", "T SD", 
+#                        "C Mean", "C SD", "F", "p", "g", "PR", "II")
+# 
+# for(l in 1:5){ 
+#   k <- 1
+#   df <- filter(ir3phon, ir3phon[paste0(sgr[l])] == 1)
+#   subres[[k]] <- subgroup_ancova(df, dvs[2], cvs[2])
+#   sub_res2[k, ] <- subgroup_table(df[c("HasLaureate", dvs[2])], subres[[k]], sgr[l], grades[4], "Post")
+#   k <- k + 1
+# }
+
+df <- filter(ir3phon, Female == 1)
+subres[[51]] <- subgroup_ancova(df, dvs[2], cvs[2])
+sub_res[51, ] <- subgroup_table(df[c("HasLaureate", dvs[2])], subres[[51]], "Female", grades[4], "Post")
+df <- filter(ir3phon, Male == 1)
+subres[[52]] <- subgroup_ancova(df, dvs[2], cvs[2])
+sub_res[52, ] <- subgroup_table(df[c("HasLaureate", dvs[2])], subres[[52]], "Male", grades[4], "Post")
+df <- filter(ir3phon, SpecialEducationSWD == 1)
+subres[[53]] <- subgroup_ancova(df, dvs[2], cvs[2])
+sub_res[53, ] <- subgroup_table(df[c("HasLaureate", dvs[2])], subres[[53]], "SpecialEducationSWD", grades[4], "Post")
+df <- filter(ir3phon, EconomicallyDisadvantaged == 1)
+subres[[54]] <- subgroup_ancova(df, dvs[2], cvs[2])
+sub_res[54, ] <- subgroup_table(df[c("HasLaureate", dvs[2])], subres[[54]], "EconomicallyDisadvantaged", grades[4], "Post")
+df <- filter(ir3phon, EnglishLanguageLearner == 1)
+subres[[55]] <- subgroup_ancova(df, dvs[2], cvs[2])
+sub_res[55, ] <- subgroup_table(df[c("HasLaureate", dvs[2])], subres[[55]], "EnglishLanguageLearner", grades[4], "Post")
+
+# Fourth grade
+dvs <- c("SpringOverallScaleScore", "SpringVocabularyScaleScore")
+cvs <- c("FallOverallScaleScore", "FallVocabularyScaleScore")
+
+ir4$Male <- ir4$Female + 1
+k <- 61
+for(j in 1:3){ # subscales
+  for(l in 1:5){ # subgroups
+    df <- filter(ir4, ir4[paste0(sgr[l])] == 1)
+    subres[[k]] <- subgroup_ancova(df, dvs[j], cvs[j])
+    sub_res[k, ] <- subgroup_table(df[c("HasLaureate", dvs[j])], subres[[k]], sgr[l], "fourth grade", "Post")
+    k <- k + 1
+  }
+}
+
+
+# Results Cleanup
+
+for(i in c(5, 6, 8, 9, 11)){sub_res[, i] <- round(sub_res[, i], 1)}
+for(i in 12:13){sub_res[, i] <- round(sub_res[, i], 2)}
+for(i in 14:15){sub_res[, i] <- round(sub_res[, i])}
+
+write.csv(sub_res, "sub_res.csv")
+
+
+# TCAP----
+
+# Scale Score
+
+# Third Grade
+# Have to standardize bc iReady and TCAP are on separate scales
+ir3t <- filter(ir3, !is.na(TCAP22))
+summary(ir3t$TCAP22)
+ir3t$FallOverallScaleScore_std <- scale(ir3t$FallOverallScaleScore)
+summary(ir3t$FallOverallScaleScore_std)
+hist(ir3t$FallOverallScaleScore_std)
+ir3t$TCAP_std <- scale(ir3t$TCAP22)
+summary(ir3t$TCAP_std)
+hist(ir3t$TCAP_std)
+
+tcap_res <- data.frame(matrix(nrow = 4, ncol = 13))
+colnames(tcap_res) <- c("Grade", "Time", "DV", "N", "T Mean", "T SD", "C Mean", "C SD", "F", "p", "g", "PR", "II")
+
+tcap3 <-  uci_fall_ancova(ir3t, "FallOverallScaleScore_std")
+tcap_res[1, ]  <- ancova_table(data.frame(ir3t$HasLaureate, ir3t$FallOverallScaleScore_std), tcap3, "third grade", "Post")
+
+tcap3 <-  uci_ancova(ir3t, "TCAP_std", "FallOverallScaleScore_std")
+tcap_res[2, ]  <- ancova_table(data.frame(ir3t$HasLaureate, ir3t$TCAP_std), tcap3, "third grade", "Post")
+  
+  
+# Fourth Grade
+
+tcap41 <-  uci_fall_ancova(ir4, "TCAP21")
+tcap_res[3, ]  <- ancova_table(data.frame(ir4$HasLaureate, ir4$TCAP21), 
+                               tcap41, "fourth grade", "Pre")
+tcap42 <-  uci_ancova(ir4, "TCAP22", "TCAP21")
+tcap_res[4, ]  <- ancova_table(data.frame(ir4$HasLaureate, ir4$TCAP22), 
+                               tcap42, "fourth grade", "Post")
+
+# Results Cleanup
+for(i in 5:10){tcap_res[, i] <- round(tcap_res[, i], 3)}
+tcap_res[, 11] <- round(tcap_res[, 11], 2)
+for(i in 12:13){
+  tcap_res[, i] <- round(tcap_res[, i]) 
+}
+write.csv(tcap_res, "TCAP results.csv", row.names = FALSE)
+  
+  
+# Logistic Regressions
+
+logres[[16]] <- uci_log(ir3t, "TCAP22AtAbove", "FallAtAboveOverall")
+lr_res[16, ] <- log_table(ir3t[c("HasLaureate", "TCAP22AtAbove")], 
+                          logres[[16]], grades[4], "Post")
+logres[[17]] <- uci_log(ir4, "TCAP22AtAbove", "TCAP21AtAbove")
+lr_res[17, ] <- log_table(ir4[c("HasLaureate", "TCAP22AtAbove")], 
+                          logres[[17]], grades[5], "Post")
+
+write.csv(lr_res, "at above res.csv")
+  
+
+# Subgroups
+
+k <- 76
+for(l in 1:5){ # subgroups
+  df <- ir3t
+  df <- filter(df, df[paste0(sgr[l])] == 1)
+  subres[[k]] <- subgroup_ancova(df, "TCAP_std", "FallOverallScaleScore_std")
+  sub_res[k, ] <- subgroup_table(df[c("HasLaureate", "TCAP_std")], 
+                                 subres[[k]], sgr[l], "third grade", "Post")
+  k <- k + 1
+}
+
+k <- 81
+for(l in 1:5){ # subgroups
+  df <- ir4
+  df <- filter(df, df[paste0(sgr[l])] == 1)
+  subres[[k]] <- subgroup_ancova(df, "TCAP22", "TCAP21")
+  sub_res[k, ] <- subgroup_table(df[c("HasLaureate", "TCAP22")], 
+                                 subres[[k]], sgr[l], "fourth grade", "Post")
+  k <- k + 1
+}
+  
+write.csv(sub_res, "subgroup results.csv")
+
+if(TRUE == FALSE){
+  
+meanskt <- anc_res[1:6, 5]
+meanskc <- anc_res[1:6, 7]
+means1t <- anc_res[7:12, 5]
+means1c <- anc_res[7:12, 7]  
+means2t <- anc_res[13:18, 5]
+means2c <- anc_res[13:18, 7]
+means3t <- anc_res[19:24, 5]
+means3c <- anc_res[19:24, 7]
+means4t <- c(anc_res[25:26, 5], NA, NA, anc_res[27:28, 5])
+means4c <- c(anc_res[25:26, 7], NA, NA, anc_res[27:28, 7])
+
+meansall <- data.frame(meanskt, meanskc, means1t, means1c, means2t,
+                       means2c, means3t, means3c, means4t, means4c)
+write.csv(meansall, "all means.csv")
+
+}
+
+if(TRUE == FALSE){
+  
+  pctkt <- c(lr_res[1:3, 5], NA)
+  pctkc <- c(lr_res[1:3, 7], NA)
+  pct1t <- c(lr_res[4:6, 5], NA)
+  pct1c <- c(lr_res[4:6, 7], NA)
+  pct2t <- c(lr_res[7:9, 5], NA)
+  pct2c <- c(lr_res[7:9, 7], NA)
+  pct3t <- lr_res[c(10:12, 16), 5]
+  pct3c <- lr_res[c(10:12, 16), 7]
+  pct4t <- lr_res[c(13:15, 17), 5]
+  pct4c <- lr_res[c(13:15, 17), 7]
+  
+  pctall <- data.frame(pctkt, pctkc, pct1t, pct1c, pct2t,
+                         pct2c, pct3t, pct3c, pct4t, pct4c)
+  write.csv(pctall, "all pct.csv")
+  
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  

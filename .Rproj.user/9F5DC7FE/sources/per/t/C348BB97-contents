@@ -1,0 +1,12 @@
+mn <- xy %>% group_by(group) %>% summarize(mean_val=mean(QualityScore))
+std <- xy %>% group_by(group) %>% summarize(sd_val=sd(QualityScore))
+
+  mutate(sd1 = mean(xy$QualityScore) - sd_val/2) %>%
+  mutate(sd2 = mean(xy$QualityScore) + sd_val/2)
+
+ggplot(data = xy, aes(x = group, y = QualityScore, color = group)) +
+  geom_point(shape = 17, size = 4) +
+#  geom_hline(data = mn, aes(yintercept = mean_val, color = group)) +
+  geom_hline(data = std, aes(yintercept = sd1, color = group)) +
+  geom_hline(data = std, aes(yintercept = sd2, color = group))
+
