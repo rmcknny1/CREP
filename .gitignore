@@ -1,8 +1,8 @@
 *~
 *.o
 *.so
-.Rhistory
-.Rproj
-.RData
+*.Rhistory
+*.Rproj
+*.RData
 Rproj.user/
-.Rproj.user
+*.Rproj.user
