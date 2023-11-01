@@ -14,7 +14,8 @@ crep_cies_pb(pi, pc, N = 0)
 \item{N}{The total sample size.}
 }
 \value{
-cies
+Uncorr. CIES: the CIES uncorrected for sample size
+Corr. CIES: The CIES corrected for sample size
 }
 \description{
 Calculates the N-corrected Cox index effect size when given the
@@ -24,12 +25,11 @@ respectively. Both should be decimals with a value < 1.00.
 
 The third argument (optional) is the total N for the dataset. If this
 argument is supplied, the correction for sample size in CIES (omega) will
-be applied. If it is not supplied, omega will not be applied.
+be applied. If it is not supplied, omega will not be applied. Omega is
+missing from the WWC handbook, but discussed in their online training
+for baseline equivalence.
 }
 \examples{
-
 crep_cies_pb(0.5, 0.7)
-
-
 crep_cies_pb(0.6, 0.4, N = 10)
 }

@@ -7,7 +7,7 @@
 crep_ii(es)
 }
 \arguments{
-\item{es}{Effect size}
+\item{es}{Effect size (g, d, CIES, or equivalent)}
 }
 \value{
 percentile rank, improvement index
@@ -19,6 +19,5 @@ size such as the CIES. Other effect sizes may be used if translated
 to g first.
 }
 \examples{
-
 CREP::crep_ii(0.25)
 }

@@ -33,16 +33,16 @@
 #' interaction). Because of this, values may differ marginally from the
 #' ANOVA-based approaches implemented in `irrICC` or other packages.
 #' Compared to ANOVA, the LME approach can handle missing data and
-#' confounding effects, allows for missing data, and will always return
-#' positive values. It can also be used to examine the degree of agreement
-#'  for variables other than rater (see example below).
+#' confounding effects, and will always return positive values.
+#' It can also be used to examine the degree of agreement
+#' for variables other than rater (see example below).
 #'
 #' Currently, the ICC value returned will always be ICC(2, 1). Future
 #' releases may expand this to an ICC(x, k) model. Additionally, the
 #' current function only looks at item, rater, and rating. Future
 #' releases will allow for more independent variables.
 #'
-#' @import stats
+#' @importFrom lme4 lmer
 #' @return The ICC, with F and p values.
 #'
 #' @examples
@@ -74,7 +74,7 @@ crep_icc <- function(df, rating = "rating", rater = "rater",
 
   # Calculate REML model
   mdl <- lme4::lmer(formula = paste0(
-    rating, " ~ 1 + (1|", rater, ") + (1|", item, ")"), data = df)
+    rating, " ~ 1 + ", item, " + (1|", rater, ") + (1|", item, ")"), data = df)
 
   # Extract variance components
   vc <- as.data.frame(lme4::VarCorr(mdl))

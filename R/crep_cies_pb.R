@@ -15,14 +15,14 @@
 #' @param pc The probability of a given result in the control group.
 #' @param N The total sample size.
 #'
-#' @return cies
+#' @return
+#' Uncorr. CIES: the CIES uncorrected for sample size
+#' Corr. CIES: The CIES corrected for sample size
+#'
 #'
 #' @export crep_cies_pb
 #' @examples
-#'
 #' crep_cies_pb(0.5, 0.7)
-#'
-#'
 #' crep_cies_pb(0.6, 0.4, N = 10)
 
 

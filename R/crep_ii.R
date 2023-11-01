@@ -7,14 +7,13 @@
 #'
 #' @usage crep_ii(es)
 #'
-#' @param es Effect size
+#' @param es Effect size (g, d, CIES, or equivalent)
 #'
 #' @export crep_ii
 #'
 #' @return percentile rank, improvement index
 #'
 #' @examples
-#'
 #' CREP::crep_ii(0.25)
 
 crep_ii <- function(es){

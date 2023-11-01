@@ -11,11 +11,13 @@ crep_scale(df, vars, type = c("standardize", "center"))
 
 \item{vars}{A string list with the names of the columns to be scaled}
 
-\item{type}{The default, "standardize", calculates z-scores for each variable.
-"center" will subtract the mean of a variable from each of its values.}
+\item{type}{The default, \code{"standardize"}, calculates z-scores for each
+variable. \code{"center"} will subtract the mean of a variable from each of
+its values.}
 }
 \value{
-crep_scale returns a new dataframe with the standardized variables attached.
+crep_scale returns a new dataframe with the standardized variables
+attached.
 }
 \description{
 When given a dataframe and a list of relevant columns, will

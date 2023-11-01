@@ -9,41 +9,50 @@ crep_icc(df, rating = "rating", rater = "rater", item = "item")
 \arguments{
 \item{df}{The dataframe that contains your IRR data.}
 
-\item{rating}{A string with the column name of your dependent variable - the ratings for each rater.
-Defaults to "rating".}
+\item{rating}{A string with the column name of your dependent variable
+\itemize{
+\item the ratings for each rater. Defaults to "rating".
+}}
 
-\item{rater}{A string with the column name of your 'rater' variable. Defaults to "rater".}
+\item{rater}{A string with the column name of your 'rater' variable.
+Defaults to "rater".}
 
-\item{item}{A string with the column name of the item. Defaults to "item".}
+\item{item}{A string with the column name of the item. Defaults to
+"item".}
 }
 \value{
 The ICC, with F and p values.
 }
 \description{
-Calculates the intraclass correlation coefficient on all main effects
-and interactions. The supplied dataframe should be long, with ratings in one column,
-rater in a second, and item identifier (usually a number, 1-11 for the RIBA or 1-26
-for the SOM) in a third. Each row should be a single item: one rating from one rater
-on one subject. If you have an expert rater to compare other raters to,
-you will need to supply their associated factor name to the "expert" argument.
+Calculates the intraclass correlation coefficient on all
+main effects and interactions. The supplied dataframe should be long,
+with ratings in one column, rater in a second, and item identifier
+(usually a number, 1-11 for the RIBA or 1-26 for the SOM) in a third.
+Each row should be a single item: one rating from one rater on one subject.
+If you have an expert rater to compare other raters to, you will need
+to supply their associated factor name to the "expert" argument.
 
-Every other column in the dataframe will be included as a possible confounder, which
-makes this procedure valid for repeated measures analysis if a column for subject is
-included. All columns will be treated as factors unless specified otherwise.
+Every other column in the dataframe will be included as a possible
+confounder, which makes this procedure valid for repeated measures
+analysis if a column for subject is included. All columns will be treated
+as factors unless specified otherwise.
 }
 \details{
-Rather than ANOVA, \code{crep_icc()} estimates the ICC using a linear mixed effects
-approach as described in Chen et al. (2017), estimated through REML. Specifically, it uses
-\code{lme4::lmer()} to estimate an LME model using all main and interaction effects (except the
-highest-level interaction). Because of this, values may differ marginally from the ANOVA-based
-approaches implemented in \code{irrICC} or other packages. Compared to ANOVA, the LME approach can handle
-missing data and confounding effects, allows for missing data, and will always return positive
-values. It can also be used to examine the degree of agreement for variables other than rater
-(see example below).
+Rather than ANOVA, \code{crep_icc()} estimates the ICC using a linear mixed
+effects approach as described in Chen et al. (2017), estimated through
+REML. Specifically, it uses \code{lme4::lmer()} to estimate an LME model
+using all main and interaction effects (except the highest-level
+interaction). Because of this, values may differ marginally from the
+ANOVA-based approaches implemented in \code{irrICC} or other packages.
+Compared to ANOVA, the LME approach can handle missing data and
+confounding effects, and will always return positive values.
+It can also be used to examine the degree of agreement
+for variables other than rater (see example below).
 
-Currently, the ICC value returned will always be ICC(2, 1). Future releases may expand this to
-an ICC(x, k) model. Additionally, the current function only looks at item,
-rater, and rating. Future releases will allow for more independent variables.
+Currently, the ICC value returned will always be ICC(2, 1). Future
+releases may expand this to an ICC(x, k) model. Additionally, the
+current function only looks at item, rater, and rating. Future
+releases will allow for more independent variables.
 }
 \examples{
 

@@ -7,10 +7,11 @@
 crep_cies_raw(group1, group2, type = "wide")
 }
 \arguments{
-\item{group1}{Data for the first group if \verb{type = "wide}. A variable indicating group
-membership if \code{type = "long"}.}
+\item{group1}{Data for the first group if \code{type = "wide"}. A variable
+indicating group membership if \code{type = "long"}.}
 
-\item{group2}{Data for the first group if \code{type = "wide"}. Outcome data if \code{type = "long"}.}
+\item{group2}{Data for the first group if \code{type = "wide"}. Outcome data
+if \code{type = "long"}.}
 
 \item{type}{Can be \code{wide} or \code{long}.}
 }
@@ -18,10 +19,11 @@ membership if \code{type = "long"}.}
 cies
 }
 \description{
-Calculates the N-corrected Cox index effect size when given two variables.
-The first two arguments should be dichotomous data. The third argument should be "wide"
-or "long", and specifies the form of the data. If each column is data for a
-separate group, the data is wide. If one column is data and the other is group
+Calculates the N-corrected Cox index effect size when
+given two variables. The first two arguments should be dichotomous
+data. The third argument should be "wide" or "long", and specifies
+the form of the data. If each column is data for a separate group,
+the data is wide. If one column is data and the other is group
 membership, the data is long. For long data, the group variable is
 expected to come first. If no type is specified, wide is the default.
 }
@@ -29,7 +31,13 @@ expected to come first. If no type is specified, wide is the default.
 df <- data.frame(treatment = c(0, 0, 0, 0, 1, 1, 1, 1),
                  control = c(1, 0, 1, 1, 0, 1, 1, 0))
 
+# If each column represents scores in a single group
 crep_cies_raw(df$treatment, df$control)
-colnames(df) <- c("group", "data")
+
+# If the first column represents group membership, and the second
+# column is the data
+
+df <- data.frame(group = rep(c("treatment", "control"), 4),
+                 data = c(1, 0, 1, 1, 0, 1, 1, 0))
 crep_cies_raw(df$group, df$data, type = "long")
 }
