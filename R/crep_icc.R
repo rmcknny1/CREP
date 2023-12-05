@@ -43,6 +43,8 @@
 #' releases will allow for more independent variables.
 #'
 #' @importFrom lme4 lmer
+#' @importFrom stats pf
+#'
 #' @return The ICC, with F and p values.
 #'
 #' @examples

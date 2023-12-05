@@ -10,6 +10,7 @@
 #' @param es Effect size (g, d, CIES, or equivalent)
 #'
 #' @export crep_ii
+#' @importFrom stats pnorm
 #'
 #' @return percentile rank, improvement index
 #'

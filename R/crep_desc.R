@@ -30,6 +30,7 @@
 #' crep_desc(df)
 #' @importFrom lawstat rjb.test
 #' @importFrom moments kurtosis skewness
+#' @importFrom stats median sd
 
 crep_desc <- function(df){
   # Build separate tables for strings/numeric variables

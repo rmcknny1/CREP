@@ -8,6 +8,9 @@
 #' @param m2 Mean of group 2.
 #' @param sd2 Standard deviation of group 2.
 #' @param n2 N of group 2.
+#' @param M Number of groups (optional, for clustered data)
+#' @param icc The intraclass correlation coefficient (optional,
+#' for clustered data)
 #'
 #' @return g
 #'
